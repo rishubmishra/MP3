@@ -178,9 +178,9 @@ void* reqFunc(void* arg){
   
   ReqParams* req = (ReqParams*) arg;
   int count = req->numofReqs;
-  
+  string data = "data " + req->name;
   for (int i = 0; i < count; i++){
-	req->reqbuff->push(req->name);
+	req->reqbuff->push(data);
   }
 
 } 
