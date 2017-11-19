@@ -106,19 +106,14 @@ long get_time_diff(struct timeval * tp1, struct timeval * tp2) {
 }
 
 //histograms
-vector<int> *joeHist;
-vector<int> *janeHist;
-vector<int> *johnHist;
 
-
-
-struct Request{
+/* struct Request{
 	string name; //who the request is for
 	Bounded_buffer* response_buff; //where the req goes
 	
 	Request(string name, Bounded_buffer* response_buff ) : 
 	name(name), response_buff(response_buff){}
-};
+}; */
 
  
 //Thread parameters
@@ -128,32 +123,32 @@ struct ReqParams{
   Bounded_buffer* reqbuff;
 
   ReqParams(string name, int numofReqs, Bounded_buffer* reqbuff) : 
-	name(name), numofReqs(numofReqs), reqbuff(reqbuff){}
+	name(name), numofReqs(numofReqs), reqbuff(reqbuff) {}
 
 };
 
 struct StatParams{
   string name;
   int numofReqs;
-  vector<int> *hist;
+  vector<int> hist;
   Bounded_buffer* statbuff;
 	
 
-  StatParams(string name, int numofReqs, vector<int> *hist, Bounded_buffer* statbuff):
-    name(name), numofReqs(numofReqs), hist(hist), statbuff(statbuff) {}
+  StatParams(string name, int numofReqs,Bounded_buffer* statbuff):
+    name(name), numofReqs(numofReqs), hist(255,0), statbuff(statbuff) {}
 };
 
 struct WorkParams{
   RequestChannel* chan;
   Bounded_buffer* buff;
-  vector<Bounded_buffer*>* responses;
-  WorkParams(RequestChannel* chan, Bounded_buffer* buff, vector<Bounded_buffer*>* responses):
-    chan(chan), buff(buff), responses(responses) {}
+  vector<Bounded_buffer*>* replyVec;
+  WorkParams(RequestChannel* chan, Bounded_buffer* buff, vector<Bounded_buffer*>* replyVec ):
+    chan(chan), buff(buff), replyVec(replyVec) {}
 };
 
 //Thread Functions
 void* reqFunc(void* arg){
-  cout << "Request Function" << endl;
+  //cout << "Request Function" << endl;
   /* ReqParams* args = (ReqParams*) arg;
   int numofReqs = args->numofReqs;
   ofstream file(args->file);
@@ -178,9 +173,10 @@ void* reqFunc(void* arg){
   
   ReqParams* req = (ReqParams*) arg;
   int count = req->numofReqs;
+  Bounded_buffer* reqbuff = req->reqbuff;
   string data = "data " + req->name;
   for (int i = 0; i < count; i++){
-	req->reqbuff->push(data);
+	reqbuff->push(data);
   }
 
 } 
@@ -205,72 +201,54 @@ void* statFunc(void* arg){
   pthread_exit(NULL); */
   
   StatParams* args = (StatParams*) arg;
-  int received = 0;
-  while(received < args->numofReqs){
-	  string str = args->statbuff->pop();
-	  int data = stoi(str);
-	  args->hist->push_back(data);
+  while(arg){
+	  
+	  int data = atoi(args->statbuff->pop().c_str());
+	 // cout << "DATA: " << data << endl;
+	  args->hist[data]++;
   }
 
 }
 
 void* workFunc(void* arg){
-  cout << "Worker Function" << endl;
-  //grabs data requests and forwards them to data server
-  WorkParams* worker = (WorkParams*) arg;
-  Bounded_buffer* buff = worker->buff;
-  RequestChannel* chan = worker->chan;
-  vector<Bounded_buffer*>* responses = worker->responses;
-  //while there are any 
- /*  for (int i = 0; i < 3; i++){
-    if (isAlive()){
-      string dataReq = dataBuff[i].pop();
-      string reply = chan->send_request(dataReq);
-
-      if (reply == "bye"){
-        livingChannels[i] = false;
-      }
-      else{statBuff[i].push(reply);}
-    }
-
-  } */
+  //cout << "Worker Function" << endl;
+  //grabs data requests and forwards reply to data server
   
-  while(true){
-	  string str = buff->pop();
-	  
-	  if (str == "quit"){
-		  chan->send_request("quit");
-		  break;
-	  }
-	  
-	  string data = "data " + str;
-	  string reply = chan->send_request(data);
-	  
-	  if(data == "data Joe Smith"){
-		responses->at(0)->push(reply);
-	  }
-	  else if(data == "data Jane Smith"){
-		responses->at(1)->push(reply);
-	  }
-	  else if (data == "data John Doe"){
-		  responses->at(2)->push(reply);
-	  }
-	  else{
-		  break;
-	  }  
+  WorkParams* worker = (WorkParams*) arg;
+  RequestChannel* chan = worker->chan;
+  Bounded_buffer* buff = worker->buff;
+  vector<Bounded_buffer*>* replyVec = worker->replyVec;
+  
+  for(;;){
+	string data = buff->pop();
+	
+	string reply = chan->send_request(data);
+	
+	if(data == "data Joe Smith"){
+		replyVec->at(0)->push(reply);
+	}
+	else if (data == "data Jane Smith"){
+		replyVec->at(1)->push(reply);
+	}
+	else if(data == "data John Doe"){
+		replyVec->at(2)->push(reply);
+	}
+	else{
+		break;
+	}
   }
   chan->send_request("quit");
-
 }
 
-string makeHistogram(string name, vector<int> *data){
-	string histogram = "Freq count for " 	+	name + ":\n";
-	
-	for (int i = 0; i < data->size(); i++){
-		histogram	+= to_string(i) + ": " + to_string(data->at(i)) + "\n";
+void makeHistogram(StatParams* stat){
+	cout << "Frequency count for " << stat->name << ":" << endl;
+	vector<int> data = stat->hist;
+	for(int i = 0; i < data.size(); i++){
+		if (data.at(i) != 0){
+			cout << i*10 << "-" << (i*10)+9 << ": " << data.at(i) << endl;
+		}
 	}
-	
-	return histogram;
+	cout << "---------------------------------------------------------" << endl;
 	
 }
 
@@ -310,10 +288,11 @@ int main(int argc, char * argv[]) {
   }
 
   int pid = fork();
-  if (pid == 0){
+  if (pid != 0){
+	  execv("dataserver", NULL);
+  }
 	struct timeval start,end;
-	ofstream ofs;
-	ofs.open("output.txt",ofstream::out | ofstream::app);
+
 	cout << "Num of data request per person: " << n << endl;
 	cout << "Size of bounded buffer between requests and worker threads: " << b << endl;
 	cout << "Num of worker threads: " << w << endl; 
@@ -323,208 +302,87 @@ int main(int argc, char * argv[]) {
 	RequestChannel* chan = new RequestChannel("control",RequestChannel::CLIENT_SIDE);
 	cout << "done." << endl;
 	cout << "-----------------------------------------------------------------------" << endl;
-		
 	
 	
-	gettimeofday(&start, NULL);
-
-	ReqParams* rt_args[3];
-	WorkParams* wt_args[w];
-	StatParams* st_args[3];
+	gettimeofday(&start,NULL);
+	pthread_t joeReqThread;
+	pthread_t janeReqThread;
+	pthread_t johnReqThread;
 	
-	pthread_t worker[w];
-	pthread_t stat[3];
-	pthread_t request[3];
-	
-	vector<Bounded_buffer*> reqBuff;
-	for (int i = 0; i < 3; i++){
-		Bounded_buffer* bb = new Bounded_buffer(b);
-		reqBuff.push_back(bb);
-	}
+	Bounded_buffer* reqBuff;
 	
 	//request thread parameters
-	ReqParams* ReqParamsJoe = new ReqParams("Joe Smith", n, reqBuff[0]);
-	rt_args[0] = ReqParamsJoe;
-	ReqParams* ReqParamsJane = new ReqParams("Jane Smith", n, reqBuff[1]);
-	rt_args[1] = ReqParamsJane;
-	ReqParams* ReqParamsJohn = new ReqParams("John Doe", n, reqBuff[2]);
-	rt_args[2] = ReqParamsJohn;
+	ReqParams* ReqParamsJoe = new ReqParams("Joe Smith", n, reqBuff);
 	
-	//statistic thread parameters
-	StatParams* StatParamsJoe = new StatParams("Joe Smith", n, joeHist, reqBuff[0] );
-	st_args[0] = StatParamsJoe;
-	StatParams* StatParamsJane = new StatParams("Jane Smith" , n, janeHist, reqBuff[1]);
-	st_args[1] = StatParamsJane;
-	StatParams* StatParamsJohn = new StatParams("John Doe", n , johnHist, reqBuff[2]);
-	st_args[2] = StatParamsJohn;
+	ReqParams* ReqParamsJane = new ReqParams("Jane Smith", n, reqBuff);
 	
-	
-	
+	ReqParams* ReqParamsJohn = new ReqParams("John Doe", n, reqBuff);
+		
 	
 	//create request threads
 	//cout << "creating request threads" << endl;
-	for (int i = 0; i < 3; i++){
-		pthread_create(&request[i], NULL, &reqFunc,(void *)&rt_args[i]);
-	}
+	pthread_create(&joeReqThread,NULL,reqFunc,static_cast<void*>(ReqParamsJoe));
+	pthread_create(&janeReqThread,NULL,reqFunc,static_cast<void*>(ReqParamsJane));
+	pthread_create(&johnReqThread,NULL,reqFunc,static_cast<void*>(ReqParamsJohn));
 	
 	//create worker threads
 	//cout << "creating worker threads" << endl;
-	vector<RequestChannel*> vec_WTchans;
-	
-	vector<Bounded_buffer*>* responses;
-	Bounded_buffer* joeResponseBuff = new Bounded_buffer(b);
-	responses->push_back(joeResponseBuff);
-	Bounded_buffer* janeResponseBuff = new Bounded_buffer(b);
-	responses->push_back(janeResponseBuff);
-	Bounded_buffer* johnResponseBuff = new Bounded_buffer(b);
-	responses->push_back(johnResponseBuff);
-	
+	vector<pthread_t> worker;	
+	vector<Bounded_buffer*> replyVec;
+	for (int i = 0; i < 3; i++){
+		Bounded_buffer* bb = new Bounded_buffer(b);
+		replyVec.push_back(bb);
+	}
 	for (int i = 0; i < w; i++){
 		string newThread = chan->send_request("newthread");
 		RequestChannel *wt_chan = new RequestChannel(newThread, RequestChannel::CLIENT_SIDE);
-		vec_WTchans.push_back(wt_chan);
-		wt_args[i] = new WorkParams(wt_chan, reqBuff[i], responses);
-		pthread_create(&worker[i],NULL,&workFunc,(void *)&wt_args[i]);	
+		pthread_t wt;
+		worker.push_back(wt);
+		WorkParams* wt_args = new WorkParams(wt_chan, reqBuff, &replyVec);
+		pthread_create(&worker.at(i),NULL, workFunc,static_cast<void*>(wt_args));	
 		
 	}
 	
+	//statistic thread parameters
+	StatParams* StatParamsJoe = new StatParams("Joe Smith", n, replyVec[0]);
+
+	StatParams* StatParamsJane = new StatParams("Jane Smith" , n, replyVec[1]);
+	
+	StatParams* StatParamsJohn = new StatParams("John Doe", n , replyVec[2]);
+	
+	pthread_t joeStatThread;
+	pthread_t janeStatThread;
+	pthread_t johnStatThread;
 	
 	//creating stat threads
 	cout << "creating stat threads" << endl;
-	for (int i = 0; i < 3; i++){
-		pthread_create(&stat[i],NULL,&statFunc,(void *)&st_args[i]);
-	}
-	
-	cout << "threads created" << endl;
+	pthread_create(&joeStatThread,NULL, statFunc,static_cast<void*>(StatParamsJoe));
+	pthread_create(&janeStatThread,NULL,statFunc,static_cast<void*>(StatParamsJane));
+	pthread_create(&johnStatThread,NULL, statFunc, static_cast<void*>(StatParamsJohn));
+
 	cout << "-----------------------------------------------------------------------" << endl;
 	
-	/* //join request threads
-	for(int i = 0; i < 3; i++){
-		pthread_join(request[i],NULL);
-	}
-	
-	
-	//quit worker threads
-	for(int i = 0; i < w; i++){
-		vec_WTchans.at(i)->send_request("quit");
-	}
-	
-	//join worker threads
-	for (int i = 0; i < w; i++){
-		pthread_join(worker[i],NULL);
-	}
-	
-	//join stat threads
-	for(int i = 0; i < 3; i++){
-		pthread_join(stat[i],NULL);
-	}
-
-	gettimeofday(&end,NULL); */
-	
-	
-
-	cout << "Joe's Histogram:" << endl << makeHistogram("Joe Smith", joeHist) << endl;
-	cout << "John's Histogram:"	<< endl << makeHistogram("John Doe" ,johnHist) << endl;
-	cout << "Jane's Histogram:"	<< endl << makeHistogram("Jane Smith" , janeHist) << endl;
-	
-	cout << endl << "Time to finish:" << to_string(get_time_diff(&start,&end)) << endl;
-	
-	
-	
-	ofs.close();
 	usleep(1000000);
-	string quit = chan->send_request("quit");
-	cout << "Bye:" << quit << endl;
 	
-  }
-  else if (pid != 0){
-	execl("dataserver",NULL);
-  }
+	cout << endl <<"Joe's Histogram:" << endl;
+	makeHistogram(StatParamsJoe);
+	cout << endl;
+	cout << "Jane's Histogram:"	<< endl;
+	makeHistogram(StatParamsJane);
+	cout << endl;
+	cout << "John's Histogram:"	<< endl;
+	makeHistogram(StatParamsJohn);
+	cout << endl;
+	
+	
+	chan->send_request("quit");
+	gettimeofday(&end,NULL);
+	cout << endl << "Time to finish: " << to_string(get_time_diff(&start,&end)) << " usecs" << endl;
+	usleep(1000000);
  
 }
 
-/*   //push the buffers onto the vectors, one of each for each person
-  for (int i = 0; i < 3; i++){
-    dataBuff.push_back(Bounded_buffer(b));
-    statBuff.push_back(Bounded_buffer(b));
-  }
 
-  cout << "buffers pushed onto vectors" << endl;
-
-  ReqParams* rt_args[3];
-  WorkParams* wt_args[w];
-
-
-  cout << "setting request thread parameters" << endl;
-  //request thread parameters
-  ReqParams* ReqParamsJoe = new ReqParams("Joe Smith", n, "JoeSmith.txt");
-  ReqParams* ReqParamsJane = new ReqParams("Jane Smith", n , "JaneSmith.txt");
-  ReqParams* ReqParamsJohn = new ReqParams("John Doe", n, "JohnDoe.txt");
-  cout << "request thread parameters set" << endl;
-
-  cout << "setting statistic thread parameters" << endl;
-  //statistic thread parameters
-  StatParams* StatParamsJoe = new StatParams("Joe Smith", n, "JoeSmith.txt");
-  StatParams* StatParamsJane = new StatParams("Jane Smith" , n, "JaneSmith.txt");
-  StatParams* StatParamsJohn = new StatParams("John Smith", n , "JohnSmith.txt");
-  cout << "statistic thread parameters set" << endl;
-
-  
-
-
-
-  vector<RequestChannel*> vec_WTchans;
-  cout << "CLIENT STARTED:" << endl;
-  cout << "Establishing control channel... " << flush;
-  RequestChannel chan("control", RequestChannel::CLIENT_SIDE);
-  cout << "done." << endl;
-
-  RequestChannel* wt_chan;
-  for (int i = 0; i < w; i++){
-	string newThread = chan.send_request("newthread");
-    wt_chan = new RequestChannel(newThread, RequestChannel::CLIENT_SIDE);
-    vec_WTchans.push_back(wt_chan);
-    wt_args[i] = new WorkParams(wt_chan);
-  }
-
-  cout << "creating threads" << endl;
-  pthread_t worker;
-
-  pthread_t JoeStats;
-  pthread_t JaneStats;
-  pthread_t JohnStats;
-
-  pthread_t JoeReqs;
-  pthread_t JaneReqs;
-  pthread_t JohnReqs;
-  cout << "threads created" << endl;
-
-  for (int i = 0; i < w; i++){
-   pthread_create(&worker, NULL,workFunc, (void*)&wt_args[i]);
-  }
-  
-  
-
-
-  gettimeofday(&start, 0);
-
-  pthread_create(&JoeStats, NULL, statFunc,(void*)StatParamsJoe);
-  pthread_create(&JaneStats, NULL, statFunc,(void*)StatParamsJane);
-  pthread_create(&JohnStats, NULL, statFunc,(void*)StatParamsJohn);
-
-  pthread_create(&JoeReqs, NULL, reqFunc, (void*)ReqParamsJoe);
-  pthread_create(&JaneReqs, NULL, reqFunc, (void*)ReqParamsJane);
-  pthread_create(&JohnReqs, NULL, reqFunc, (void*)ReqParamsJohn);
-
-  pthread_join(JoeStats,NULL);
-  pthread_join(JaneStats,NULL);
-  pthread_join(JohnStats,NULL);
-
-  gettimeofday(&end,0);
-
-  long completion = get_time_diff(&start,&end);
-
-  } */
 
 
   
